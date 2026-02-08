@@ -255,32 +255,32 @@ What we also define for the catalog create is where the data will go, as in our 
 If you read the previous blogs, note the $$<Params> parameters are now wrapped in ‘ ” & “’ quotes, just something that’s required as the values are passed around from the docker-compose into the helper scripts.
 
 ```shell
-    command:
-      - "-c"
-      - >-
-        chmod +x /polaris/create-catalog.sh;
-        chmod +x /polaris/obtain-token.sh;
-        source /polaris/obtain-token.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CLIENT_ID" "$$CLIENT_SECRET";
-        export PROPERTIES='{
-          "default-base-location": "s3a://'$$S3_BUCKET'/iceberg",
-          "s3a.endpoint": "'$$S3_ENDPOINT'",
-          "s3a.path-style-access": true,
-          "s3a.access-key-id": "'$$AWS_ACCESS_KEY_ID'",
-          "s3a.secret-access-key": "'$$AWS_SECRET_ACCESS_KEY'",
-          "s3a.region": "'$$AWS_REGION'"
-        }';
-        export STORAGE_CONFIG_INFO='{
-          "storageType": "S3",
-          "endpoint": "'$$S3_ENDPOINT'",
-          "endpointInternal": "'$$S3_ENDPOINT'",
-          "region": "'$$AWS_REGION'",
-          "pathStyleAccess": true,
-          "allowedLocations": ["s3a://'$$S3_BUCKET'/iceberg/*"],
-          "accessKeyId": "'$$AWS_ACCESS_KEY_ID'",
-          "secretAccessKey": "'$$AWS_SECRET_ACCESS_KEY'"
-        }';
-        export STORAGE_LOCATION="s3a://$$S3_BUCKET/iceberg";
-        source /polaris/create-catalog.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CATALOG_NAME";
+command:
+    - "-c"
+    - >-
+    chmod +x /polaris/create-catalog.sh;
+    chmod +x /polaris/obtain-token.sh;
+    source /polaris/obtain-token.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CLIENT_ID" "$$CLIENT_SECRET";
+    export PROPERTIES='{
+        "default-base-location": "s3a://'$$S3_BUCKET'/iceberg",
+        "s3a.endpoint": "'$$S3_ENDPOINT'",
+        "s3a.path-style-access": true,
+        "s3a.access-key-id": "'$$AWS_ACCESS_KEY_ID'",
+        "s3a.secret-access-key": "'$$AWS_SECRET_ACCESS_KEY'",
+        "s3a.region": "'$$AWS_REGION'"
+    }';
+    export STORAGE_CONFIG_INFO='{
+        "storageType": "S3",
+        "endpoint": "'$$S3_ENDPOINT'",
+        "endpointInternal": "'$$S3_ENDPOINT'",
+        "region": "'$$AWS_REGION'",
+        "pathStyleAccess": true,
+        "allowedLocations": ["s3a://'$$S3_BUCKET'/iceberg/*"],
+        "accessKeyId": "'$$AWS_ACCESS_KEY_ID'",
+        "secretAccessKey": "'$$AWS_SECRET_ACCESS_KEY'"
+    }';
+    export STORAGE_LOCATION="s3a://$$S3_BUCKET/iceberg";
+    source /polaris/create-catalog.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CATALOG_NAME";
 ```
 
 
