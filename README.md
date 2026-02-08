@@ -305,25 +305,6 @@ tier:
 ```
 
 
-## Regarding our Stack
-
-The following stack is deployed using one of the provided  `<Project Root>/devlab/docker-compose-*.yaml` files as per above.
-
-- [Apache Flink 1.20.2](https://nightlies.apache.org/flink/flink-docs-release-1.20/)                   
-
-- [Apache Flink CDC 3.5.0](https://nightlies.apache.org/flink/flink-cdc-docs-release-3.5/)
-
-- [Apache Iceberg 1.9.1.](https://iceberg.apache.org)
-
-- [Apache Polaris (Incubating)](https://polaris.apache.org) – we used latest
-
-- [PostgreSQL 15](https://www.postgresql.org)
-
-- [MinIO](https://www.min.io) - Project has gone into Maintenance mode... 
-
-- [ShadowTraffic](https://shadowtraffic.io)
-
-
 ## Summary
 
 So, we now have a working example whereby we insert two data products into PostgreSQL tables. We then utilise Apache Flink CDC to source those records into transient Apache Flink Tables. From there we push the data steam into Apache Fluss (Incubating) configured with Apache Iceberg as lakehouse tier, hosted on a S3/MinIO Object store, all with Apache Polaris (Incubating) as metadata store for our Iceberg table. 
@@ -365,4 +346,21 @@ In recent years, pivoted into a more generic Technology Architect role, capable 
 
 
 
+## Regarding our Stack
+
+The following stack is deployed using one of the provided  `<Project Root>/devlab/docker-compose-*.yaml` files as per above.
+
+- [Apache Flink 1.20.2](https://nightlies.apache.org/flink/flink-docs-release-1.20/)                   
+
+- [Apache Flink CDC 3.5.0](https://nightlies.apache.org/flink/flink-cdc-docs-release-3.5/)
+
+- [Apache Iceberg 1.9.1.](https://iceberg.apache.org)
+
+- [Apache Polaris (Incubating)](https://polaris.apache.org) – we used latest
+
+- [PostgreSQL 15](https://www.postgresql.org)
+
+- [MinIO](https://www.min.io) - Project has gone into Maintenance mode... 
+
+- [ShadowTraffic](https://shadowtraffic.io)
 
