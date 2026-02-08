@@ -1,6 +1,6 @@
-# An Pratical Example "How to" Source data from a Postgres, Push it into Apache Fluss with Iceberg based Lakehouse tier'd onto S3 With a Polaris/REST Catalog.
+## An Pratical Example "How to" Source data from a Postgres, Push it into Apache Fluss with Iceberg based Lakehouse tier'd onto S3 With a apache Polaris/REST Catalog.
 
-## Blog Overview
+### Blog Overview
 
 So this blog is a continuation from the previous. As such, it's going to be shorter..., well we will continue trying to get them shorter.
 
@@ -10,10 +10,9 @@ We previously we used Apache Paimon as our Open Table Format, for which we then 
 This time round, we're deploying a similar stack, but based on Apache Polaris (Incubating) as our metadata catalog store (with a PostgreSQL datastore for persistance), again.
 
 
+Accompanying BLOG: [An Practical “How to” build a PostgresSQL -> Apache Fluss with Apache Iceberg based Lakehouse streaming solution, using Apache Polaris (Incubating) Catalog](https://medium.com/@georgelza/an-practical-how-to-build-a-postgressql-apache-fluss-with-apache-iceberg-based-lakehouse-polaris)
+
 **NOTES:** As per previous, for using local File System during testing as lakehouse storage, Dual mount your ./tmp/paimon in container to say ./data/paimon: locally, This needs to be done in BOTH the Flink containers (Jobmanager, TaskManager) and the Fluss Incubating containers (coordinator-server and tablet-servers).
-
-
-
 
 ## Building
 
