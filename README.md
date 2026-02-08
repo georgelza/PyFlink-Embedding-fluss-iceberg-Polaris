@@ -316,6 +316,8 @@ The following stack is deployed using one of the provided  `<Project Root>/devla
 
 - [Apache Iceberg 1.9.1.](https://iceberg.apache.org)
 
+- [Apache Polaris (Incubating)](https://polaris.apache.org) – we used latest
+
 - [PostgreSQL 15](https://www.postgresql.org)
 
 - [MinIO](https://www.min.io) - Project has gone into Maintenance mode... 
@@ -325,14 +327,13 @@ The following stack is deployed using one of the provided  `<Project Root>/devla
 
 ## Summary
 
+So, we now have a working example whereby we insert two data products into PostgreSQL tables. We then utilise Apache Flink CDC to source those records into transient Apache Flink Tables. From there we push the data steam into Apache Fluss (Incubating) configured with Apache Iceberg as lakehouse tier, hosted on a S3/MinIO Object store, all with Apache Polaris (Incubating) as metadata store for our Iceberg table. 
 
+Nifty, I think.
 
+As previous, these are not complete solutions, but rather blocks that can be used to build a larger stack. I have one 
 
-
-
-
-
-
+Last blog in this series, but that’s waiting for Apache Fluss (Incubating) 0.9.0, which is imminent.
 
 
 **THE END**
