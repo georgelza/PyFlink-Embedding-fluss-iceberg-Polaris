@@ -324,7 +324,7 @@ Thanks for following. Till next time.
 
 ### The Rabbit Hole
 
-<img src="blog-doc/diagrams/rabbithole.jpg" alt="Our Build" width="400" height="400>
+<img src="blog-doc/diagrams/rabbithole.jpg" alt="Our Build" width="400" height="400">
 
 And like that we’re done with our little trip down another Rabbit Hole.
 
