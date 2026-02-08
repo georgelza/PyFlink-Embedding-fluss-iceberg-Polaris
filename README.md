@@ -187,7 +187,7 @@ The biggest part of this how to blog can be found in the Apache Polaris (Incubat
 The source file can be found in <Project root>/devlab1/conf.
 This file contains the following S3 settings.
 
-```shell
+```bash
 fs.s3a.endpoint
 fs.s3a.access.key
 fs.s3a.secret.key
@@ -213,7 +213,7 @@ For the below code snippet, see the values for:
 
 Both configured as `icebergcat`. Make note of this… ;)
 
-```shell
+```bash
 environment:
     - |
     FLUSS_PROPERTIES=
@@ -253,7 +253,7 @@ What we also define for the catalog create is where the data will go, as in our 
 
 If you read the previous blogs, note the $$<Params> parameters are now wrapped in ‘ ” & “’ quotes, just something that’s required as the values are passed around from the docker-compose into the helper scripts.
 
-```shell
+```bash
 command:
     - "-c"
     - >-
@@ -285,7 +285,7 @@ command:
 
 ### Tiering Job
   
-```yaml
+```bash
 tier:
 	@echo "-- Submitting Iceberg Tiering Job... Polaris Catalog"
 	docker compose exec --interactive --tty jobmanager \
@@ -324,7 +324,7 @@ Thanks for following. Till next time.
 
 ### The Rabbit Hole
 
-<img src="blog-doc/diagrams/rabbithole.jpg" alt="Our Build" width="600">
+<img src="blog-doc/diagrams/rabbithole.jpg" alt="Our Build" width="400" height="400>
 
 And like that we’re done with our little trip down another Rabbit Hole.
 
