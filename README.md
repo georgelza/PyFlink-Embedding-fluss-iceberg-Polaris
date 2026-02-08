@@ -342,7 +342,7 @@ In recent years, pivoted into a more generic Technology Architect role, capable 
 
 
 
-<img src="blog-doc/diagrams/TechCentralFeb2020-george-leonard.jpg" alt="Our Build" width="600">
+<img src="blog-doc/diagrams/TechCentralFeb2020-george-leonard.jpg" alt="Me" width="400" height="400">
 
 
 
