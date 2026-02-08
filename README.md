@@ -1,6 +1,5 @@
-## An Pratical Example "How to" Source data from a Postgres, Push it into Apache Fluss with Iceberg based Lakehouse tier'd onto S3 With a apache Polaris/REST Catalog.
+## An Pratical Example "How to" Source data from a Postgres, Push it into Apache Fluss with Iceberg based Lakehouse tier'd onto S3 with a Apache Polaris (Incubating) REST based Catalog.
 
-### Blog Overview
 
 So this blog is a continuation from the previous. As such, it's going to be shorter..., well we will continue trying to get them shorter.
 
