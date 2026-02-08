@@ -1,0 +1,46 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+set -e
+
+apk add --no-cache jq
+
+polarishost=${1:-"polaris"}
+realm=${2:-"POLARIS"}
+client_id=${3:-""}
+client_secret=${4:-""}
+
+echo obtain-token
+echo "Polaris Host:    ${polarishost}"
+echo "Realm:           ${realm}"
+echo "client_id:       ${client_id}"
+echo "client_secret:   ${client_secret}"
+
+TOKEN=$(curl -s http://${polarishost}:8181/api/catalog/v1/oauth/tokens \
+  --user ${client_id}:${client_secret} \
+  -H "Polaris-Realm: $realm" \
+  -d grant_type=client_credentials \
+  -d scope=PRINCIPAL_ROLE:ALL | jq -r .access_token)
+
+if [ -z "${TOKEN}" ]; then
+  echo "Failed to obtain access token."
+  exit 1
+fi
+
+export TOKEN

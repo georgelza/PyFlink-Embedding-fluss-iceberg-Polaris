@@ -1,0 +1,815 @@
+{
+    "generators": [
+        {
+            "name": "_g_accountsholders",
+            "table": "accountholders",
+            "vars": {
+
+                "now":              {"_gen": "now"},
+                "country":          {"_gen": "env", "var": "COUNTRY"},
+                "numBankAccounts":  {"_gen": "constant", "x": {"_gen": "env", "var": "NUM_ACCOUNTS"},  "cast": "integer"},
+                "numCredCards":     {"_gen": "constant", "x": {"_gen": "env", "var": "NUM_CREDCARDS"}, "cast": "integer"},
+                "sleep":            {"_gen": "constant", "x": {"_gen": "env", "var": "SLEEP"}, "cast": "integer"},
+
+                "dob_oldest": {
+                    "_gen": "math",
+                    "expr": "now - lower",
+                    "names": {
+                        "lower": {
+                            "_gen": "duration",
+                            "days": 24780
+                        }
+                    }
+                },
+                "dob_youngest": {
+                    "_gen": "math",
+                    "expr": "now - upper",
+                    "names": {
+                        "upper": {
+                            "_gen": "duration",
+                            "days": 6372
+                        }
+                    }
+                },
+                // CC to expire shortly, in 10 days
+                "card_lower": {
+                    "_gen": "math",
+                    "expr": "now + lower",
+                    "names": {
+                        "lower": {
+                            "_gen": "duration",
+                            "days": 10
+                        }
+                    }
+                },
+
+                // CC to expire max period, 3 yrs, 3 x 354 = 1062 - 10 days we allow above.
+                "card_upper": {
+                    "_gen": "math",
+                    "expr": "now + upper",
+                    "names": {
+                        "upper": {
+                            "_gen": "duration",
+                            "days": 1052
+                        }
+                    }
+                },
+
+                // Cleaner, read the tenants, aka banks in from a external JSON file, tenants.json
+                "tenants": {
+                    "_gen": "loadJsonFile",
+                    "file": "/home/tenants.json"                    
+                }
+            },
+
+            "row": {
+
+                // Defined it as the primary key
+                "nationalId": {
+                    "_gen": "string", 
+                    "expr": "#{regexify '[0-99]{2}[1-11]{2}[1-30]{2}-[0-9]{4}-[0]{1}[8-9]{1}[0-9]{1}'}",
+                    "pgHint": "VARCHAR(16) PRIMARY KEY"
+                },
+
+                "firstName":  {"_gen": "string", "expr": "#{Name.firstName}" },
+                "lastName":   {"_gen": "string", "expr": "#{Name.lastName}" },       
+   
+                "dob": {
+                    "_gen": "formatDateTime",
+                    "format": "yyyy-MM-dd",
+                    "ms": {
+                        "_gen": "uniformDistribution",
+                        "bounds": [
+                            {"_gen": "var", "var": "dob_oldest"},
+                            {"_gen": "var", "var": "dob_youngest"}
+                        ]
+                    },
+                    "pgHint": "VARCHAR(10)"
+                },
+
+                "gender": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {"weight": 48, "value": "M"},
+                        {"weight": 52, "value": "F"}
+                    ]
+                },
+
+                "children": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        0,
+                        5
+                    ],
+                    "pgHint": "INTEGER"
+                },
+
+                "eMailAddress":      {"_gen": "string", "expr": "#{Internet.emailAddress}"},
+
+                "mobilePhoneNumber": {"_gen": "string", "locale": ["en", "za"], "expr": "#{PhoneNumber.cellPhone}"},
+                                
+                "address": {
+                    "streetAddress": {"_gen": "string", "locale": ["en", "za"], "expr": "#{Address.streetAddress}"},
+                    "suburb":        {"_gen": "string", "locale": ["en", "za"], "expr": "#{Address.cityPrefix}"},
+                    "town":          {"_gen": "string", "locale": ["en", "za"], "expr": "#{Address.cityName}" },
+                    "province":      {"_gen": "string", "locale": ["en", "za"], "expr": "#{Address.state}" },
+                    "country":       {"_gen": "var",    "var": "country"},
+                    "postalCode":    {"_gen": "string", "locale": ["en", "za"], "expr": "#{Address.postcode}"}
+                },
+
+                "accounts": {
+                    "bankAccounts":{
+                        "_gen": "repeatedly",
+                        "n": {
+                            "_gen": "uniformDistribution",
+                            "bounds": [
+                                1,
+                                {"_gen": "var", "var": "numBankAccounts"}
+                            ]
+                        },
+                        "target": {
+                            "tenantId":  {"_gen": "var", "var": "tenants", "path": ["tenantId"]},
+                            "branchId":  {"_gen": "string", "expr":"#{regexify '[0-9]{6}'}"},
+                            "accountId": {"_gen": "string", "expr":"#{regexify '[0-9]{4}-[0-9]{10}'}"},
+                            "entityId":  {"_gen": "var", "var": "tenants", "path": ["memberName"]},
+                        
+                            "accountType": {
+                                "_gen": "weightedOneOf",
+                                "choices": [
+                                    {"weight": 3,  "value": "Savings"},
+                                    {"weight": 8,  "value": "Transaction"}, 
+                                    {"weight": 6,  "value": "Cheque"},
+                                    {"weight": 5,  "value": "Overdraft"}
+                                ]
+                            },
+                            "openingDate": {
+                                "_gen": "formatDateTime",
+                                "format": "yyyy-MM-dd",
+                                "ms": {
+                                    "_gen": "uniformDistribution",
+                                    "bounds": [ 170176905, { "_gen": "now" } ]
+                                }
+                            },
+
+                            "idCode": "RTC10"
+                        }
+                    },
+
+                    "creditCards":{
+                        "_gen": "repeatedly",
+                        "n": {
+                            "_gen": "uniformDistribution",
+                            "bounds": [
+                                1,
+                                {"_gen": "var", "var": "numCredCards"}
+                            ]
+                        },
+                        "target": {
+                            "cardNumber": {"_gen": "string", "expr": "#{Finance.creditCard}" },
+                            "cardType": {
+                                "_gen": "weightedOneOf",
+                                "choices": [
+                                    {"weight": 3,  "value": "MasterCard"},
+                                    {"weight": 7,  "value": "Visa"},
+                                    {"weight": 2,  "value": "AmericanExpress"},
+                                    {"weight": 1,  "value": "DinersClub"}
+                                ]
+                            },
+                            "expDate": {
+                                "_gen": "formatDateTime",
+                                "format": "MM/YY",
+                                "ms": {
+                                    "_gen": "uniformDistribution",
+                                    "bounds": [
+                                        {"_gen": "var", "var": "card_lower"},
+                                        {"_gen": "var", "var": "card_upper"}
+                                    ]
+                                }
+                            },
+                            "issuingBank": {"_gen": "var", "var": "tenants", "path": ["memberName"]},
+                            "tenantId":  {"_gen": "var", "var": "tenants", "path": ["tenantId"]}
+                        }
+                    }
+                    
+                }
+                
+            },
+            "localConfigs": {
+                "maxEvents": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        2,
+                        6
+                    ]
+                },
+                "throttleMs": {"_gen": "var", "var": "sleep"}
+            }
+        },
+
+        {
+            "name": "_g_txn_outbound",
+            "table": "transactions",
+            "vars": {
+
+                "now":      {"_gen": "now"},
+                "sleep":    {"_gen": "constant", "x": {"_gen": "env", "var": "SLEEP"}, "cast": "integer"},
+
+                // Lets get two random parties to dance.
+                "payer": {
+                    "_gen": "lookup",
+                    "table": "accountholders",
+                    "path": [
+                        "row"
+                    ]
+                },
+
+                "payee": {
+                    "_gen": "lookup",
+                    "table": "accountholders",
+                    "path": [
+                        "row"
+                    ]
+                },
+
+                "payerNationalId": {
+                    "_gen": "var",
+                    "var": "payer",
+                    "path": ["nationalId"]
+                },
+                "payerAccount": {
+                    "_gen": "oneOf",
+                    "choices": 
+                    {
+                        "_gen": "var",
+                        "var": "payer",
+                        "path": ["accounts", "bankAccounts"]
+                    }
+                },
+
+                "payeeNationalId": {
+                    "_gen": "var",
+                    "var": "payee",
+                    "path": ["nationalId"]
+                },
+                "payeeAccount": {
+                    "_gen": "oneOf",
+                    "choices": 
+                    {
+                        "_gen": "var",
+                        "var": "payee",
+                        "path": ["accounts", "bankAccounts"]
+                    }
+                },
+
+                "baseCurrency": {"_gen": "env", "var": "BASECURRENCY"},      
+                "roe":          {"_gen": "constant", "x": {"_gen": "env", "var": "ROE"},           "cast": "double"},
+                "low_amnt":     {"_gen": "constant", "x": {"_gen": "env", "var": "TXN_AMNT_LOW"},  "cast": "double"},
+                "high_amnt":    {"_gen": "constant", "x": {"_gen": "env", "var": "TXN_AMNT_HIGH"}, "cast": "double"},
+                "currency":     {"_gen": "env", "var": "CURRENCY"},
+
+                "requestExecutionDate": {
+                    "_gen": "formatDateTime",
+                    "format": "yyyy-MM-dd",
+                    "ms": {
+                        "_gen": "uniformDistribution",
+                        "bounds": [ 
+                            {"_gen": "now" }, 
+                            {
+                                "_gen": "math",
+                                "expr": "now + upper",
+                                "names": {
+                                    "upper": {
+                                        "_gen": "duration",
+                                        "days": 3
+                                    }
+                                }
+                            } 
+                        ]
+                    }
+                },
+
+                "settlementDate": {
+                    "_gen": "formatDateTime",
+                    "format": "yyyy-MM-dd",
+                    "ms": {
+                        "_gen": "uniformDistribution",
+                        "bounds": [ 
+                            {"_gen": "now" }, 
+                            {
+                                "_gen": "math",
+                                "expr": "now + upper",
+                                "names": {
+                                    "upper": {
+                                        "_gen": "duration",
+                                        "days": 7
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+
+                "destinationCountry":   {"_gen": "env", "var": "DEST_COUNTRY"},
+
+                "transactionId":        {"_gen": "uuid", "version": 7},
+
+                "txnBaseAmount": {
+                    "_gen": "uniformDistribution",
+                    "bounds": [
+                        {"_gen": "var", "var": "low_amnt"}, 
+                        {"_gen": "var", "var": "high_amnt"}
+                    ],
+                    "decimals": 2
+                },
+                
+                "value":  {"_gen": "multiply", "args": [
+                        {"_gen": "var", "var": "txnBaseAmount"}, 
+                        {"_gen": "var", "var": "roe"}
+                    ],
+                    "decimals": 2
+                },
+
+                "amount": {
+                    "baseCurrency": {"_gen": "var", "var": "baseCurrency"},
+                    "baseValue":    {"_gen": "var", "var": "txnBaseAmount"},
+                    "roe":          {"_gen": "var", "var": "roe"},
+                    "currency":     {"_gen": "var", "var": "currency"},
+                    "value":        {"_gen": "var", "var": "value"}
+                },
+                
+                // Lets compile our account profiles for the account* and counterparty*
+                // // Outbound / Payer
+                "payerTenantId": {
+                    "_gen": "var",
+                    "var": "payerAccount",
+                    "path": ["tenantId"]
+                },
+                "payerAccountAgentId": {
+                    "_gen": "var",
+                    "var": "payerAccount",
+                    "path": ["tenantId"]
+                },
+                "payerAccountBranchId": {
+                    "_gen": "var",
+                    "var": "payerAccount",
+                    "path": ["branchId"]
+                },
+                "payerAccountId": {
+                    "_gen": "var",
+                    "var": "payerAccount",
+                    "path": ["accountId"]
+                },
+
+                // // Inbound / Payee
+                "payeeTenantId": {
+                    "_gen": "var",
+                    "var": "payeeAccount",
+                    "path": ["tenantId"]
+                },
+                "payeeAccountAgentId": {
+                    "_gen": "var",
+                    "var": "payeeAccount",
+                    "path": ["tenantId"]
+                },
+                "payeeAccountBranchId": {
+                    "_gen": "var",
+                    "var": "payeeAccount",
+                    "path": ["branchId"]
+                },
+                "payeeAccountId": {
+                    "_gen": "var",
+                    "var": "payeeAccount",
+                    "path": ["accountId"]
+                },
+
+                "paymentClearingSystemReference": {"_gen": "string", "expr":"#{regexify '[0-9]{9}'}"}
+
+            },
+            "row": {
+                // Outbound Event
+
+                // This is unique per event, we also define it as the primary key
+                "eventId": {
+                    "_gen": "uuid", 
+                    "version": 7,
+                    "pgHint": "VARCHAR(36) PRIMARY KEY"
+                },
+
+                // This is shared between the outbound and inbound events.
+                "transactionId": {
+                    "_gen": "uuid",
+                    "version": 7,
+                    "pgHint": "VARCHAR(36)"
+                },
+
+                "eventTime":    {
+                    "_gen": "now",
+                    "serialize": {
+                        "type": "postgresTimestamp"
+                    }
+                },
+
+                "direction": "outbound",
+
+                "eventType": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {"weight": 4,  "value": "paymentRT"},
+                        {"weight": 12, "value": "paymentNRT"}
+                    ],
+                    "pgHint": "VARCHAR(10)"
+                },
+
+                "creationDate": {
+                    "_gen": "formatDateTime",
+                    "ms": {
+                        "_gen": "now"
+                    },
+                    "format": "yyyy-MM-dd'T'HH:mm:ss",
+                    "pgHint": "VARCHAR(20)"
+                },
+
+                "accountholderNationalId":  {"_gen": "var", "var": "payerNationalId"},
+                "accountholderAccount":     {"_gen": "var", "var": "payerAccount"},
+
+                "counterPartyNationalId":   {"_gen": "var", "var": "payeeNationalId"},
+                "counterPartyAccount":      {"_gen": "var", "var": "payeeAccount"},
+
+                // Outbound leg so account holder = payer information
+                "tenantId": {
+                    "_gen": "var",
+                    "var": "payerTenantId",
+                    "pgHint": "VARCHAR(8)"
+                },
+                "fromId": {
+                    "_gen": "var",
+                    "var": "payerTenantId",
+                    "pgHint": "VARCHAR(8)"
+                },
+                "accountAgentId": {
+                    "_gen": "var",
+                    "var": "payerAccountAgentId",
+                    "pgHint": "VARCHAR(8)"
+                }, 
+                "fromFIBranchId": {
+                    "_gen": "var",
+                    "var": "payerAccountBranchId",
+                    "pgHint": "VARCHAR(6)"
+                },
+                "accountNumber": {
+                    "_gen": "var",
+                    "var": "payerAccountId",
+                    "pgHint": "VARCHAR(16)"
+                },
+                "accountIdCode": "RTC10",
+
+                // Outbound leg so counterParty = payee information
+                "toId": {
+                    "_gen": "var",
+                    "var": "payeeTenantId",
+                    "pgHint": "VARCHAR(8)"
+                },
+                "counterpartyAgentId": {
+                    "_gen": "var",
+                    "var": "payeeAccountAgentId",
+                    "pgHint": "VARCHAR(8)"
+                },
+                "toFIBranchId": {
+                    "_gen": "var",
+                    "var": "payeeAccountBranchId",
+                    "pgHint": "VARCHAR(6)"
+                },
+                "counterpartyNumber": {
+                    "_gen": "var",
+                    "var": "payeeAccountId",
+                    "pgHint": "VARCHAR(16)"
+                },
+                "counterpartyIdCode": "RTC30",
+
+                "amount": {"_gen": "var", "var": "amount"},
+
+                "msgType": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {"weight": 8,  "value": "RTCCT"},
+                        {"weight": 5,  "value": "RTCCR"}
+                    ],
+                    "pgHint": "VARCHAR(6)"
+                },
+
+                "settlementClearingSystemCode": {
+                    "_gen": "weightedOneOf",
+                    "choices": [
+                        {"weight": 4,   "value": "RTC"},
+                        {"weight": 8,   "value": "EFT"},
+                        {"weight": 5,   "value": "DC"},
+                        {"weight": 3,   "value": "RPP"}
+                    ],
+                    "pgHint": "VARCHAR(5)"
+                },
+
+                "paymentClearingSystemReference": {
+                    "_gen": "var", 
+                    "var": "paymentClearingSystemReference",
+                    "pgHint": "VARCHAR(12)"
+                },
+
+                "requestExecutionDate":     {
+                    "_gen": "var", 
+                    "var": "requestExecutionDate",
+                    "pgHint": "VARCHAR(10)"
+                },
+                "settlementDate":           {
+                    "_gen": "var", 
+                    "var": "settlementDate",
+                    "pgHint": "VARCHAR(10)"
+                },
+                "destinationCountry":       {"_gen": "var", "var": "destinationCountry",
+                    "pgHint": "VARCHAR(30)"
+                },
+                "localInstrument":          "42",
+                "msgStatus":                "Settlement",
+
+                "paymentMethod":            "TRF",
+                "settlementMethod":         "CLRG",
+                "transactionType":          "42",
+                "verificationResult":       "SUCC",
+                "numberOfTransactions":     1,
+                "schemaVersion":            1,
+                "usercode" :                "0000"
+
+            },
+            "localConfigs": {
+                "maxEvents": 1,
+                "throttleMs": {"_gen": "var", "var": "sleep"}
+            }
+        },
+        {
+            "name": "_g_txn_inbound",
+            "table": "transactions",
+            "vars": {
+                "OUTBOUND": {
+                    "_gen": "lookup",
+                    "table": "transactions",
+                    "path": ["row"],
+                    "strategy": "last"
+                },
+                "sleep":    {"_gen": "constant", "x": {"_gen": "env", "var": "SLEEP"}, "cast": "integer"}
+            },
+            "row": {
+                // Inbound Event
+
+                // This is unique per event, we also define it as the primary key
+                "eventId":   {
+                    "_gen": "uuid", 
+                    "version": 7,
+                    "pgHint": "VARCHAR(36) PRIMARY KEY"
+                },
+
+                // This is shared across the outbound and inbound events.
+                "transactionId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["transactionId"],
+                    "pgHint": "VARCHAR(36)"
+                },
+                
+                "eventTime":    {
+                    "_gen": "now",
+                    "serialize": {
+                        "type": "postgresTimestamp"
+                    }
+                },
+                
+                "direction": "inbound",
+
+                "eventType": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["eventType"],
+                    "pgHint": "VARCHAR(10)"
+                },
+
+                "creationDate": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["creationDate"],
+                    "pgHint": "VARCHAR(20)"
+                },
+
+                "accountholderNationalId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["counterPartyNationalId"],
+                    "pgHint": "VARCHAR(16)"
+                },                
+                "accountholderAccount": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["counterPartyAccount"]
+                },   
+                "counterPartyNationalId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["accountholderNationalId"],
+                    "pgHint": "VARCHAR(16)"
+                },  
+                "counterPartyAccount": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["accountholderAccount"]
+                },   
+
+                // Inbound leg so accountHolder = payee information
+                "tenantId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["toId"],
+                    "pgHint": "VARCHAR(8)"
+                },
+                "fromId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["toId"],
+                    "pgHint": "VARCHAR(8)"
+                },
+                "accountAgentId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["counterpartyAgentId"],
+                    "pgHint": "VARCHAR(8)"
+                }, 
+                "fromFIBranchId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["toFIBranchId"],
+                    "pgHint": "VARCHAR(6)"
+                },
+                "accountNumber": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["counterpartyNumber"],
+                    "pgHint": "VARCHAR(16)"
+                },
+                "accountIdCode": "RTC30",
+
+                // Inbound leg so counterParty = payer information
+                "toId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["fromId"],
+                    "pgHint": "VARCHAR(8)"
+                },
+                "counterpartyAgentId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["accountAgentId"],
+                    "pgHint": "VARCHAR(8)"
+                },
+                "toFIBranchId": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["fromFIBranchId"],
+                    "pgHint": "VARCHAR(6)"
+                },
+                "counterpartyNumber": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["accountNumber"],
+                    "pgHint": "VARCHAR(16)"
+                },
+                "counterpartyIdCode": "RTC10",
+
+                "amount": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["amount"]
+                },
+
+                "msgType": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["msgType"],
+                    "pgHint": "VARCHAR(6)"
+                },
+
+                "settlementClearingSystemCode": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["settlementClearingSystemCode"],
+                    "pgHint": "VARCHAR(5)"
+                },
+
+                "paymentClearingSystemReference": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["paymentClearingSystemReference"],
+                    "pgHint": "VARCHAR(12)"
+                },
+
+                "requestExecutionDate":     {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["requestExecutionDate"],
+                    "pgHint": "VARCHAR(10)"
+                },
+                "settlementDate":           {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["settlementDate"],
+                    "pgHint": "VARCHAR(10)"
+                },
+                "destinationCountry":       {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["destinationCountry"],
+                    "pgHint": "VARCHAR(30)"
+                },
+                "localInstrument":          {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["localInstrument"],
+                    "pgHint": "VARCHAR(2)"
+                },
+                "msgStatus":                {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["msgStatus"],
+                    "pgHint": "VARCHAR(10)"
+                },
+                "paymentMethod":            {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["paymentMethod"],
+                    "pgHint": "VARCHAR(3)"
+                },
+                "settlementMethod":         {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["settlementMethod"],
+                    "pgHint": "VARCHAR(4)"
+                },
+                "transactionType":          {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["transactionType"],
+                    "pgHint": "VARCHAR(2)"
+                },
+                "verificationResult":       {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["verificationResult"],
+                    "pgHint": "VARCHAR(8)"
+                },
+                "numberOfTransactions":     {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["numberOfTransactions"],
+                    "pgHint": "VARCHAR(2)"
+                },
+                "schemaVersion":            {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["schemaVersion"],
+                    "pgHint": "VARCHAR(2)"
+                },
+                "usercode": {
+                    "_gen": "var",
+                    "var": "OUTBOUND",
+                    "path": ["usercode"],
+                    "pgHint": "VARCHAR(4)"
+                }
+
+            },
+            "localConfigs": {
+                "maxEvents": 1,
+                "throttleMs": {"_gen": "var", "var": "sleep"}
+            }
+        }
+    ],
+    "schedule": {
+        "loop": true,
+        "stages": [
+            {
+                "generators": [
+                    "_g_accountsholders"
+                ]
+            },
+            {
+                "generators": [
+                    "_g_txn_outbound"
+                ]               
+            },
+            {
+                "generators": [
+                    "_g_txn_inbound"
+                ]                                   
+            }
+        ]
+    },
+    "connections": {
+        "_gen": "loadJsonFile",
+        "file": "/home/conn.json"         
+
+    }
+}

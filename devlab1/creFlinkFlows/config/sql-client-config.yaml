@@ -1,0 +1,8 @@
+# creFlinkFlows/config/sql-client-conf.yaml
+
+execution:
+  planner: blink
+  type: streaming
+
+configuration:
+  execution.checkpointing.interval: 60s

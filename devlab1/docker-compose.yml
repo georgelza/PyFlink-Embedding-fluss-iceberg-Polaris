@@ -1,0 +1,624 @@
+
+configs:
+
+  hadoop-conf:
+    file: conf/core-site.xml
+
+  flink-conf:
+    file: conf/flink/config.yaml
+
+  log4j:
+    file: conf/log4j/log4j.properties
+  log4j-console:
+    file: conf/log4j/log4j-console.properties
+  log4j-session:
+    file: conf/log4j/log4j-session.properties
+
+  postgres_conf:
+    file: conf/pg/postgresql.conf
+  postgres_hba:
+    file: conf/pg/pg_hba.conf
+
+services:
+  ################################################################################
+  # begin Flink cluster
+  #
+  # Lots of Jar's added to the base image, Fluss, JDBC, PostgreSQL, Iceberg, S3
+  ################################################################################
+  jobmanager:
+    image: ${REPO_NAME}/apacheflink-1.20.2-scala_2.12-java17:1.0.6
+    hostname: jobmanager
+    container_name: jobmanager
+    ports:
+      - 8084:8081
+
+    deploy:
+      resources:
+          limits:
+            memory: 6G
+
+    environment:
+      - ENV_ROOTLOG_LEVEL=DEBUG
+      - ENV_FLINKLOG_LEVEL=INFO
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+      - AWS_REGION=${S3_REGION}
+      - AWS_DEFAULT_REGION=${S3_REGION}
+
+    volumes:
+      - ./creFlinkFlows:/creFlinkFlows
+      - ./pyflink:/pyflink
+      
+      - ./data/flink/logs:/opt/flink/log
+      - ./data/flink/checkpoints:/opt/flink/checkpoints
+      - ./data/flink/rocksdb:/opt/flink/rocksdb
+      - ./data/flink/catalogs:/opt/flink/conf/catalogs
+    configs:
+      - source: hadoop-conf
+        target: /opt/flink/conf/core-site.xml
+      - source: flink-conf
+        target: /opt/flink/conf/config.yaml
+      - source: log4j
+        target: /opt/flink/conf/log4j.properties
+      - source: log4j-console
+        target: /opt/flink/conf/log4j-console.properties
+      - source: log4j-session
+        target: /opt/flink/conf/log4j-session.properties
+    command: jobmanager
+
+  taskmanager:
+    image: ${REPO_NAME}/apacheflink-1.20.2-scala_2.12-java17:1.0.6
+    depends_on:
+      - jobmanager
+    deploy:
+      replicas: 1
+      resources:
+          limits:
+            memory: 12G  # Ensure this is higher than taskmanager.memory.process.size
+                         # Also make sure this aligns with the config file value specified for the taskmanager => memory.process.size: 12gb 
+    environment:
+      - ENV_ROOTLOG_LEVEL=INFO
+      - ENV_FLINKLOG_LEVEL=INFO
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+      - AWS_REGION=${S3_REGION}
+      - AWS_DEFAULT_REGION=${S3_REGION}
+
+    volumes:
+      - ./creFlinkFlows:/creFlinkFlows
+      - ./pyflink:/pyflink
+
+      - ./data/flink/logs:/opt/flink/log
+      - ./data/flink/checkpoints:/opt/flink/checkpoints
+      - ./data/flink/rocksdb:/opt/flink/rocksdb
+      - ./data/flink/catalogs:/opt/flink/conf/catalogs
+    configs:
+      - source: hadoop-conf
+        target: /opt/flink/conf/core-site.xml
+      - source: flink-conf
+        target: /opt/flink/conf/config.yaml
+      - source: log4j
+        target: /opt/flink/conf/log4j.properties
+      - source: log4j-console
+        target: /opt/flink/conf/log4j-console.properties
+      - source: log4j-session
+        target: /opt/flink/conf/log4j-session.properties
+    command: taskmanager
+
+  ################################################################################
+  # Will act as a destination store from where we will CDC our data to be embedded
+  ################################################################################
+  postgrescdc:
+    image: postgres:15
+    hostname: postgrescdc
+    container_name: postgrescdc
+    restart: unless-stopped
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DB=demog
+      - POSTGRES_USER=dbadmin
+      - POSTGRES_PASSWORD=dbpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbadmin -d demog"]
+      interval: 10s
+      timeout: 5s
+      retries: 5    
+    volumes:
+      - ./data/postgrescdc:/var/lib/postgresql/data
+      - ./sql/postgrescdc:/docker-entrypoint-initdb.d
+    configs:
+      - source: postgres_conf
+        target: /etc/postgresql/postgresql.conf
+      - source: postgres_hba
+        target: /etc/postgresql/data/pg_hba.conf
+    command: -c config_file=/etc/postgresql/postgresql.conf
+
+  ################################################################################
+  # Will act as a persistent destination for our Polaris catalog
+  ################################################################################
+  postgrescat:
+    image: postgres:15
+    hostname: postgrescat
+    container_name: postgrescat
+    depends_on:
+      - zookeeper
+    restart: unless-stopped
+    ports:
+      - 5433:5432
+    environment:
+      - POSTGRES_DB=catalogs
+      - POSTGRES_USER=dbadmin
+      - POSTGRES_PASSWORD=dbpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbadmin -d catalogs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - ./data/postgrescat:/var/lib/postgresql/data
+      - ./sql/postgrescat:/docker-entrypoint-initdb.d
+    configs:
+      - source: postgres_conf
+        target: /etc/postgresql/postgresql.conf
+      - source: postgres_hba
+        target: /etc/postgresql/data/pg_hba.conf
+    command: -c config_file=/etc/postgresql/postgresql.conf
+  
+  ################################################################################
+  # Polaris REST based Catalog for Iceberg objects, can also be used using generic_tables
+  # for other non Iceberg objects
+  # Order and health are critical
+  # postgrescat & minio first, then polaris-bootstrap, polaris, followed by polaris-setup
+  ################################################################################
+  polaris-bootstrap:
+    image: apache/polaris-admin-tool:latest
+    hostname: polaris-bootstrap
+    container_name: polaris-bootstrap
+    depends_on:
+      postgrescat:
+        condition: service_healthy    
+    environment:
+      - POLARIS_REALM=${POLARIS_REALM}
+      - POLARIS_PERSISTENCE_TYPE=relational-jdbc
+
+      - QUARKUS_DATASOURCE_JDBC_URL=jdbc:postgresql://${POSTGRES_CAT_HOST}:5432/${POSTGRES_CAT_DB}
+      - QUARKUS_DATASOURCE_USERNAME=${POSTGRES_CAT_USER}
+      - QUARKUS_DATASOURCE_PASSWORD=${POSTGRES_CAT_PASSWORD}
+
+      - ROOT_CLIENT_ID=${ROOT_CLIENT_ID}
+      - ROOT_CLIENT_SECRET=${ROOT_CLIENT_SECRET}
+    command:
+      - "bootstrap"
+      - "--realm=${POLARIS_REALM}"
+      - "--credential=${POLARIS_REALM},${ROOT_CLIENT_ID},${ROOT_CLIENT_SECRET}"
+
+  polaris:
+    image: apache/polaris:latest
+    hostname: polaris
+    container_name: polaris
+    depends_on:
+      polaris-bootstrap:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio-client:                           # ← add this, otherwise the bucket etc is not defined inside polaris by the time the coordinator tries and contacts it.
+        condition: service_completed_successfully 
+    ports:
+      # API port
+      - "8181:8181"
+      # Management port (metrics and health checks)
+      - "8182:8182"
+      # Optional, allows attaching a debugger to the Polaris JVM
+      - "5005:5005"
+    environment:
+
+      POLARIS.FEATURES."ALLOW_INSECURE_STORAGE_TYPES": "true"
+      POLARIS.FEATURES."SUPPORTED_CATALOG_STORAGE_TYPES": "[\"FILE\",\"S3\"]"
+      POLARIS.READINESS.IGNORE-SEVERE-ISSUES: "true"
+      POLARIS.REALM-CONTEXT.REALMS: ${POLARIS_REALM}
+
+      POLARIS_BOOTSTRAP_CREDENTIALS: ${POLARIS_REALM},${ROOT_CLIENT_ID},${ROOT_CLIENT_SECRET}
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_MAX_RETRIES: 5
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_INITIAL_DELAY_IN_MS: 100
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_MAX_DURATION_IN_MS: 5000
+
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://${POSTGRES_CAT_HOST}:5432/${POSTGRES_CAT_DB}
+      QUARKUS_DATASOURCE_USERNAME: ${POSTGRES_CAT_USER}
+      QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_CAT_PASSWORD}
+      QUARKUS_OTEL_SDK_DISABLED: true
+
+      # S3 endpoint for MinIO
+      AWS_REGION: ${S3_REGION}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+
+    volumes:
+      - ./data/polaris:/var/lib/polaris
+      - ./conf/polaris:/polaris 
+    healthcheck:
+      test: ["CMD", "curl", "http://localhost:8182/q/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  polaris-setup:
+    image: alpine/curl
+    hostname: polaris-setup
+    container_name: polaris-setup
+    depends_on:
+      polaris:
+        condition: service_healthy
+    environment:
+      - POLARIS_HOST=${POLARIS_HOST}
+      - POLARIS_REALM=${POLARIS_REALM}
+      - CATALOG_NAME=${CATALOG_NAME}
+      - CLIENT_ID=${ROOT_CLIENT_ID}
+      - CLIENT_SECRET=${ROOT_CLIENT_SECRET}
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+      - AWS_REGION=${S3_REGION}
+      - AWS_ENDPOINT_URL=${S3_ENDPOINT}
+    volumes:
+      - ./conf/polaris/:/polaris
+    entrypoint: "/bin/sh"
+    command:
+      - "-c"
+      - >-
+        chmod +x /polaris/create-catalog.sh;
+        chmod +x /polaris/obtain-token.sh;
+        source /polaris/obtain-token.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CLIENT_ID" "$$CLIENT_SECRET";
+        export PROPERTIES='{
+          "default-base-location": "s3a://'$$S3_BUCKET'/iceberg",
+          "s3a.endpoint": "'$$S3_ENDPOINT'",
+          "s3a.path-style-access": true,
+          "s3a.access-key-id": "'$$AWS_ACCESS_KEY_ID'",
+          "s3a.secret-access-key": "'$$AWS_SECRET_ACCESS_KEY'",
+          "s3a.region": "'$$AWS_REGION'"
+        }';
+        export STORAGE_CONFIG_INFO='{
+          "storageType": "S3",
+          "endpoint": "'$$S3_ENDPOINT'",
+          "endpointInternal": "'$$S3_ENDPOINT'",
+          "region": "'$$AWS_REGION'",
+          "pathStyleAccess": true,
+          "allowedLocations": ["s3a://'$$S3_BUCKET'/iceberg/*"],
+          "accessKeyId": "'$$AWS_ACCESS_KEY_ID'",
+          "secretAccessKey": "'$$AWS_SECRET_ACCESS_KEY'"
+        }';
+        export STORAGE_LOCATION="s3a://$$S3_BUCKET/iceberg";
+        source /polaris/create-catalog.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CATALOG_NAME";
+
+
+  ################################################################################
+  # Begin Fluss cluster
+  ################################################################################
+  coordinator-server:
+    image: georgelza/fluss_0.8.0-incubating:1.0.2
+    hostname: coordinator-server
+    container_name: coordinator-server
+    # It's strange but this little dependency list is actually very important.
+    depends_on:
+      polaris-setup:                          # ← add this, otherwise the bucket etc is not defined inside polaris by the time the coordinator tries and contacts it.
+        condition: service_completed_successfully         
+      zookeeper:
+        condition: service_started   
+      polaris:
+        condition: service_healthy       
+    environment:
+      - |
+        FLUSS_PROPERTIES=
+          bind.listeners                                : INTERNAL://coordinator-server:9124, CLIENT://coordinator-server:9123
+          advertised.listeners                          : INTERNAL://coordinator-server:9124, CLIENT://coordinator-server:9123
+          zookeeper.address                             : zookeeper:2181
+          internal.listener.name                        : INTERNAL
+
+          data.dir                                      : /tmp/local-data
+          remote.data.dir                               : /tmp/remote-data
+
+          # Lakehouse store on S3 and catalog in Polaris
+          datalake.enabled                                : true
+          datalake.format                                 : iceberg
+          datalake.iceberg.warehouse                      : icebergcat    # NOTE: this aligns with our polaris catalog, also matches below catalog.name value.
+          datalake.iceberg.table-default.file.format      : parquet
+
+          # Polaris Catalog
+          datalake.iceberg.catalog.name                   : icebergcat
+          datalake.iceberg.type                           : rest
+          datalake.iceberg.uri                            : http://polaris:8181/api/catalog  # Correct - client adds /v1/icebergcat automatically
+          datalake.iceberg.oauth2-server-uri              : http://polaris:8181/api/catalog/v1/oauth/tokens
+          datalake.iceberg.credential: ${ROOT_CLIENT_ID}  :${ROOT_CLIENT_SECRET}
+          datalake.iceberg.scope                          : PRINCIPAL_ROLE:ALL
+
+    ports:
+      - "9123:9123"
+    volumes:
+      # NOTE: these directories inside the containers (coordinator and tablet-servers-*) cannot be specified as i.e.:
+      # /fluss/local-data or
+      # /fluss/remote_data or
+      # /iceberg, 
+      # they all need to be configured under /tmp, just soemthing that caused problems, and once changed problems left the building.
+      - ./data/fluss/cs/local-data:/tmp/local-data
+      - ./data/fluss/cs/remote-data:/tmp/remote-data
+    configs:
+      - source: hadoop-conf
+        target: /opt/fluss/conf/core-site.xml
+
+    # healthcheck:
+    #   test: ["CMD-SHELL", "curl -f http://localhost:9123/health || exit 1"]
+    #   interval: 15s
+    #   timeout: 10s
+    #   retries: 5  
+    # Above Started failing so replaced with below pgrep -f test
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f CoordinatorServer || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    command: ["bin/coordinator-server.sh", "start-foreground"]
+
+
+  tablet-server-1:
+    image: georgelza/fluss_0.8.0-incubating:1.0.2
+    hostname: tablet-server-1
+    container_name: tablet-server-1
+    depends_on:
+      # - coordinator-server
+      coordinator-server:
+        condition: service_healthy         
+    ports:
+      - "9124:9124"
+    environment:
+      - |
+        FLUSS_PROPERTIES=
+          bind.listeners                                : INTERNAL://tablet-server-1:9124, CLIENT://tablet-server-1:9123
+          advertised.listeners                          : INTERNAL://tablet-server-1:9124, CLIENT://tablet-server-1:9123
+          internal.listener.name                        : INTERNAL
+          tablet-server.id                              : 1
+          zookeeper.address                             : zookeeper:2181
+          coordinator.host                              : coordinator-server
+          coordinator.port                              : 9123
+          log.segment.file-size                         : 10MB
+          kv.snapshot.interval                          : 0s
+
+          data.dir                                      : /tmp/local-data
+          remote.data.dir                               : /tmp/remote-data
+
+          # Lakehouse store on S3 and catalog in Polaris
+          datalake.enabled                                : true
+          datalake.format                                 : iceberg
+          datalake.iceberg.warehouse                      : icebergcat    # NOTE: this aligns with our polaris catalog, also matches below catalog.name value.
+          datalake.iceberg.table-default.file.format      : parquet
+
+          # Polaris Catalog
+          datalake.iceberg.catalog.name                   : icebergcat
+          datalake.iceberg.type                           : rest
+          datalake.iceberg.uri                            : http://polaris:8181/api/catalog  # Correct - client adds /v1/icebergcat automatically
+          datalake.iceberg.oauth2-server-uri              : http://polaris:8181/api/catalog/v1/oauth/tokens
+          datalake.iceberg.credential: ${ROOT_CLIENT_ID}  :${ROOT_CLIENT_SECRET}
+          datalake.iceberg.scope                          : PRINCIPAL_ROLE:ALL
+
+    volumes:
+      - ./data/fluss/ts1/local-data:/tmp/local-data
+      - ./data/fluss/ts1/remote-data:/tmp/remote-data
+    configs:
+      - source: hadoop-conf
+        target: /opt/fluss/conf/core-site.xml      
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9124/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    command: ["bin/tablet-server.sh", "start-foreground"]
+
+
+  tablet-server-2:
+    image: georgelza/fluss_0.8.0-incubating:1.0.2
+    hostname: tablet-server-2
+    container_name: tablet-server-2
+    depends_on:
+      coordinator-server:
+        condition: service_healthy         
+    ports:
+      - "9125:9124"
+    environment:
+      - |
+        FLUSS_PROPERTIES=
+          bind.listeners                                : INTERNAL://tablet-server-2:9124, CLIENT://tablet-server-2:9123
+          advertised.listeners                          : INTERNAL://tablet-server-2:9124, CLIENT://tablet-server-2:9123
+          internal.listener.name                        : INTERNAL
+          tablet-server.id                              : 2
+          zookeeper.address                             : zookeeper:2181
+          coordinator.host                              : coordinator-server
+          coordinator.port                              : 9123
+          log.segment.file-size                         : 10MB
+          kv.snapshot.interval                          : 0s
+
+          data.dir                                      : /tmp/local-data
+          remote.data.dir                               : /tmp/remote-data
+
+          # Lakehouse store on S3 and catalog in Polaris
+          datalake.enabled                                : true
+          datalake.format                                 : iceberg
+          datalake.iceberg.warehouse                      : icebergcat    # NOTE: this aligns with our polaris catalog, also matches below catalog.name value.
+          datalake.iceberg.table-default.file.format      : parquet
+
+          # Polaris Catalog
+          datalake.iceberg.catalog.name                   : icebergcat
+          datalake.iceberg.type                           : rest
+          datalake.iceberg.uri                            : http://polaris:8181/api/catalog  # Correct - client adds /v1/icebergcat automatically
+          datalake.iceberg.oauth2-server-uri              : http://polaris:8181/api/catalog/v1/oauth/tokens
+          datalake.iceberg.credential: ${ROOT_CLIENT_ID}  :${ROOT_CLIENT_SECRET}
+          datalake.iceberg.scope                          : PRINCIPAL_ROLE:ALL
+
+    volumes:
+      - ./data/fluss/ts2/local-data:/tmp/local-data
+      - ./data/fluss/ts2/remote-data:/tmp/remote-data
+    configs:
+      - source: hadoop-conf
+        target: /opt/fluss/conf/core-site.xml
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9124/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    command: ["bin/tablet-server.sh", "start-foreground"]
+
+
+  tablet-server-3:
+    image: georgelza/fluss_0.8.0-incubating:1.0.2
+    hostname: tablet-server-3
+    container_name: tablet-server-3
+    depends_on:
+      coordinator-server:
+        condition: service_healthy         
+    ports:
+      - "9126:9124"
+    environment:
+      - |
+        FLUSS_PROPERTIES=
+          bind.listeners                                : INTERNAL://tablet-server-3:9124, CLIENT://tablet-server-3:9123
+          advertised.listeners                          : INTERNAL://tablet-server-3:9124, CLIENT://tablet-server-3:9123
+          internal.listener.name                        : INTERNAL
+          tablet-server.id                              : 3          
+          zookeeper.address                             : zookeeper:2181
+          coordinator.host                              : coordinator-server
+          coordinator.port                              : 9123
+          log.segment.file-size                         : 10MB
+          kv.snapshot.interval                          : 0s
+
+          data.dir                                      : /tmp/local-data
+          remote.data.dir                               : /tmp/remote-data
+
+          # Lakehouse store on S3 and catalog in Polaris
+          datalake.enabled                                : true
+          datalake.format                                 : iceberg
+          datalake.iceberg.warehouse                      : icebergcat    # NOTE: this aligns with our polaris catalog, also matches below catalog.name value.
+          datalake.iceberg.table-default.file.format      : parquet
+
+          # Polaris Catalog
+          datalake.iceberg.catalog.name                   : icebergcat
+          datalake.iceberg.type                           : rest
+          datalake.iceberg.uri                            : http://polaris:8181/api/catalog  # Correct - client adds /v1/icebergcat automatically
+          datalake.iceberg.oauth2-server-uri              : http://polaris:8181/api/catalog/v1/oauth/tokens
+          datalake.iceberg.credential: ${ROOT_CLIENT_ID}  :${ROOT_CLIENT_SECRET}
+          datalake.iceberg.scope                          : PRINCIPAL_ROLE:ALL
+
+    volumes:
+      - ./data/fluss/ts3/local-data:/tmp/local-data
+      - ./data/fluss/ts3/remote-data:/tmp/remote-data
+    configs:
+      - source: hadoop-conf
+        target: /opt/fluss/conf/core-site.xml
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9124/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    command: ["bin/tablet-server.sh", "start-foreground"]
+
+  
+  # ZooKeeper for Fluss Cluster coordination
+  zookeeper:
+    image: zookeeper:3.9.2
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=zookeeper:2888:3888;2181
+    volumes:
+      - ./data/zk/data:/data
+      - ./data/zk/datalog:/datalog
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # minio Object Storage - S3 Compatible Storage  
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    hostname: minio
+    container_name: minio
+    ports:
+      - ${MINIO_API_PORT}:9000                         # API address   
+      - ${MINIO_CONSOLE_PORT}:9001                     # Web UI console
+    environment:  
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}          # access.key: mnadmin
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}  # secret.key: mnpassword
+      - AWS_REGION=${S3_REGION}
+      - AWS_DEFAULT_REGION=${S3_REGION}
+
+      - MINIO_ENDPOINT=${S3_ENDPOINT}
+      - MINIO_BUCKET=${S3_BUCKET}
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY}
+      - MINIO_DOMAIN=${MINIO_ALIAS}
+    volumes:
+      - ./data/minio:/data    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 5s
+    command: ["server", "/data", "--console-address", ":9001"]
+
+
+  minio-client:
+    image: minio/mc:latest
+    hostname: mc
+    container_name: mc
+    depends_on:
+      minio:
+        condition: 
+          service_healthy    
+    environment:
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+      - AWS_REGION=${S3_REGION}
+      - AWS_DEFAULT_REGION=${S3_REGION}
+
+      - MINIO_ENDPOINT=${S3_ENDPOINT}
+      - MINIO_BUCKET=${S3_BUCKET}
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY}
+      - MINIO_DOMAIN=${MINIO_ALIAS}
+    entrypoint: >
+      sh -c '
+        echo "Configuring MinIO client...";
+        until (mc alias set ${MINIO_ALIAS} ${S3_ENDPOINT} ${S3_ACCESS_KEY_ID} ${S3_SECRET_ACCESS_KEY}) do echo '...waiting...' && sleep 1; done;
+
+        echo "Creating ${S3_BUCKET} bucket...";
+        if mc ls ${MINIO_ALIAS}/${S3_BUCKET} >/dev/null 2>&1; then
+          echo "ℹ️  Bucket ${S3_BUCKET} already exists";
+        else
+          mc mb ${MINIO_ALIAS}/${S3_BUCKET} --ignore-existing;
+          echo "✅ Bucket ${S3_BUCKET} created successfully!";
+        fi;
+        echo " " | mc pipe minio/warehouse/iceberg/.keep;
+        mc policy set public minio/warehouse
+
+        echo "🎉 MinIO bucket '${MINIO_ALIAS}/${S3_BUCKET}' created successfully";
+      '     
+
+    labels:
+      - "com.${COMPOSE_PROJECT_NAME}.service=init"
+      - "com.${COMPOSE_PROJECT_NAME}.description=Initialize MinIO buckets"
+
+################################################################################
+# Without a network explicitly defined, you hit this Hive/Thrift error
+# java.net.URISyntaxException Illegal character in hostname
+# https://github.com/TrivadisPF/platys-modern-data-platform/issues/231
+networks:
+  default:
+    name: ${COMPOSE_PROJECT_NAME}
