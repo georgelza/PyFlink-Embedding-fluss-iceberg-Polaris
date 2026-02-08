@@ -1,5 +1,6 @@
 ## An Pratical Example "How to" Source data from a Postgres, Push it into Apache Fluss with Iceberg based Lakehouse tier'd onto S3 with a Apache Polaris (Incubating) REST based Catalog.
 
+### Blog Overview
 
 So this blog is a continuation from the previous. As such, it's going to be shorter..., well we will continue trying to get them shorter.
 
@@ -13,7 +14,7 @@ Accompanying BLOG: [An Practical “How to” build a PostgresSQL -> Apache Flus
 
 **NOTES:** As per previous, for using local File System during testing as lakehouse storage, Dual mount your ./tmp/paimon in container to say ./data/paimon: locally, This needs to be done in BOTH the Flink containers (Jobmanager, TaskManager) and the Fluss Incubating containers (coordinator-server and tablet-servers).
 
-## Building
+**Building**
 
 Below is the Dockerfile's for our main 2 container images, namely the Apache Flink and Apache Fluss (incubating).
 
