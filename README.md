@@ -156,7 +156,7 @@ USER flink:flink
 CMD ./bin/start-cluster.sh && sleep infinity
 ```
 
-## Running Labs
+## Running Lab
 
 Once we have these 2 containers build we can run the lab, as contained in `devlab1`.
 
@@ -170,11 +170,121 @@ The lab can be found in `<Project root>/devlab1`
 
 - `make ahs` or `make txns`
 
+- Run the ShadowTraffic load generator, `<Project root>/shadowtraffic/run_pg#.sh`
+
 - `make tier`
+
+Note: you can also run the ShadowTraffic after the deploy command.
+
+
+## Key Findings:
+
+The biggest part of this how to blog can be found in the Apache Polaris (Incubating) and Apache Fluss (Incubating) Docker-Compose service definition. Peeking behind the curtain… well the surprise was values required, was not as expected, and the “sharing” of values between the Apache Polaris (Incubating) and Apache Fluss (Incubating) docker-compose services.
+
+- Pay careful attention to each service “depends_on” block. It’s surprising how important the correct order is.
+
+- For both the Apache Flink and Apache Fluss (Incubating) service we use a configs import to “import” the Hadoop configuration file into /opt/<Software>/conf/core-site.xml
+
+The source file can be found in <Project root>/devlab1/conf.
+This file contains the following S3 settings.
+
+```shell
+fs.s3a.endpoint
+fs.s3a.access.key
+fs.s3a.secret.key
+fs.s3a.path.style.access
+fs.s3a.connection.ssl.enabled
+fs.s3a.impl
+fs.s3a.aws.credentials.provider
+```
+
+
+### Apache Fluss (Incubating) 
+
+(`<Project root>/devlab1/docker-compose.yaml`)
+
+-> `coordinator-server` & `tablet-server-#` services
+
+For the below code snippet, see the values for:
+
+- datalake.iceberg.warehouse and 
+
+- datalake.iceberg.catlog.name. 
+
+
+Both configured as `icebergcat`. Make note of this… ;)
+
+```shell
+environment:
+    - |
+    FLUSS_PROPERTIES=
+        bind.listeners                                : INTERNAL://coordinator-server:9124, CLIENT://coordinator-server:9123
+        advertised.listeners                          : INTERNAL://coordinator-server:9124, CLIENT://coordinator-server:9123
+        zookeeper.address                             : zookeeper:2181
+        internal.listener.name                        : INTERNAL
+
+        data.dir                                      : /tmp/local-data
+        remote.data.dir                               : /tmp/remote-data
+
+        # Lakehouse store on S3 and catalog in Polaris
+        datalake.enabled                                : true
+        datalake.format                                 : iceberg
+        datalake.iceberg.warehouse                      : icebergcat    # NOTE: this aligns with our polaris catalog, also matches below catalog.name value.
+        datalake.iceberg.table-default.file.format      : parquet
+
+        # Polaris Catalog
+        datalake.iceberg.catalog.name                   : icebergcat
+        datalake.iceberg.type                           : rest
+        datalake.iceberg.uri                            : http://polaris:8181/api/catalog  # Correct - client adds /v1/icebergcat automatically
+        datalake.iceberg.oauth2-server-uri              : http://polaris:8181/api/catalog/v1/oauth/tokens
+        datalake.iceberg.credential: ${ROOT_CLIENT_ID}  :${ROOT_CLIENT_SECRET}
+        datalake.iceberg.scope                          : PRINCIPAL_ROLE:ALL
+```
+
+### Apache Polaris Configuration
+
+(`<Project root>/devlab1/docker-compose.yaml`)
+-> `polaris-setup` service
+
+And we’re back, now the next bit, and this is where things get tied together, note the very last line, where we tell polaris-setup to create our catalog using our helper script (create-catalog.sh, which can be found in conf/polaris), well the last parameter, catalog-name. 
+
+Well, this comes from our .env file, and without “copying” the contents here, the value specified is “icebergcat”, as also used/specified above in our coordinator-server (and the not shown tablet-server-# service configurations). 
+
+What we also define for the catalog create is where the data will go, as in our S3 location, which now maps to s3a://warehouse/iceberg which is again a value specified in .env as S3_BUCKET and well iceberg is iceberg ;).
+
+If you read the previous blogs, note the $$<Params> parameters are now wrapped in ‘ ” & “’ quotes, just something that’s required as the values are passed around from the docker-compose into the helper scripts.
+
+```shell
+    command:
+      - "-c"
+      - >-
+        chmod +x /polaris/create-catalog.sh;
+        chmod +x /polaris/obtain-token.sh;
+        source /polaris/obtain-token.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CLIENT_ID" "$$CLIENT_SECRET";
+        export PROPERTIES='{
+          "default-base-location": "s3a://'$$S3_BUCKET'/iceberg",
+          "s3a.endpoint": "'$$S3_ENDPOINT'",
+          "s3a.path-style-access": true,
+          "s3a.access-key-id": "'$$AWS_ACCESS_KEY_ID'",
+          "s3a.secret-access-key": "'$$AWS_SECRET_ACCESS_KEY'",
+          "s3a.region": "'$$AWS_REGION'"
+        }';
+        export STORAGE_CONFIG_INFO='{
+          "storageType": "S3",
+          "endpoint": "'$$S3_ENDPOINT'",
+          "endpointInternal": "'$$S3_ENDPOINT'",
+          "region": "'$$AWS_REGION'",
+          "pathStyleAccess": true,
+          "allowedLocations": ["s3a://'$$S3_BUCKET'/iceberg/*"],
+          "accessKeyId": "'$$AWS_ACCESS_KEY_ID'",
+          "secretAccessKey": "'$$AWS_SECRET_ACCESS_KEY'"
+        }';
+        export STORAGE_LOCATION="s3a://$$S3_BUCKET/iceberg";
+        source /polaris/create-catalog.sh "$$POLARIS_HOST" "$$POLARIS_REALM" "$$CATALOG_NAME";
+```
 
 
 ### Tiering Job
-
   
 ```yaml
 tier:
@@ -194,13 +304,6 @@ tier:
 			--datalake.iceberg.credential ${ROOT_CLIENT_ID}:${ROOT_CLIENT_SECRET} \
 			--datalake.iceberg.scope PRINCIPAL_ROLE:ALL
 ```
-
-
-**Previous Blog** As background context.
-
-BLOG: [An Practical “How to” build a PostgresSQL -> Apache Fluss with Apache Paimon based Lakehouse streaming solution](https://medium.com/@georgelza/an-practical-how-to-build-a-postgressql-apache-fluss-with-apache-paimon-based-lakehouse-b3e14a7e0c52)
-
-GIT REPO: [PyFlink-Embedding-fluss-paimon](https://github.com/georgelza/PyFlink-Embedding-fluss-paimon.git)
 
 
 ## Regarding our Stack
